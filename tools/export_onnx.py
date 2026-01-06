@@ -46,6 +46,7 @@ def main(config, model_path, output_path, input_shape=(320, 320)):
         torch.randn(1, 3, input_shape[0], input_shape[1])
     )
 
+    model.eval()
     torch.onnx.export(
         model,
         dummy_input,
