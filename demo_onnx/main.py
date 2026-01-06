@@ -158,7 +158,7 @@ def iou(boxes1, boxes2):
 def run_infer(onnx_model, input_size, n_classes, in_path, out_path):
     img = cv.imread(in_path)
     if img is None:
-        raise "Invalid image"
+        raise ValueError("Invalid image")
 
     img_size = img.shape[:2]
     img_input = preprocess(img, input_size)
@@ -197,6 +197,9 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    run_infer(
-        args.model, eval(args.input_size), args.n_classes, args.input, args.output
-    )
+    try:
+        run_infer(
+            args.model, eval(args.input_size), args.n_classes, args.input, args.output
+        )
+    except ValueError:
+        print("error: invalid image")
