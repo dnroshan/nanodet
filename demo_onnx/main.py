@@ -1,6 +1,6 @@
-import sys
 import argparse
 import math
+import random
 import numpy as np
 import cv2 as cv
 import onnxruntime as ort
@@ -17,7 +17,7 @@ STRIDES = [8, 16, 32, 64]
 
 def preprocess(img, input_size):
     img_size = img.shape[:2]
-    img = cv2.resize(img, input_size)
+    img = cv.resize(img, input_size)
     img = img.astype(np.float32) / 255.0
     mean = np.array(MEAN, dtype="float32").reshape(1, 1, -1) / 255.0
     std = np.array(STD, dtype="float32").reshape(1, 1, -1) / 255.0
@@ -34,7 +34,7 @@ def get_priors(fmap_size, stride):
     y = y.flatten()
     x = x.flatten()
     s = np.full(x.shape, stride)
-    grid = np.stack((x, y, s, s), axis=-1)
+    grid = np.stack((x, y, s), axis=-1)
     return grid
 
 
@@ -66,9 +66,9 @@ def distance_to_box(center, dist, max_size):
     return np.stack((x1, y1, x2, y2), axis=-1)
 
 
-def post_process(output, input_size, n_classes):
-    scores = output[..., :n_classes]
-    reg_preds = output[..., n_classes:]
+def post_process(output, input_size, num_class):
+    scores = output[..., :num_class]
+    reg_preds = output[..., num_class:]
 
     fmap_sizes = [
         (math.ceil(input_size[1] / s), math.ceil(input_size[0] / s)) for s in STRIDES
@@ -125,7 +125,55 @@ def iou(boxes1, boxes2):
     return inter_a / union_a
 
 
-def run_infer(onnx_model, input_size, n_classes, in_path, out_path):
+def gen_random_colors(num_classes):
+    colors = []
+    for _ in range(num_classes):
+        r = random.randint(0, 255)
+        g = random.randint(0, 255)
+        b = random.randint(0, 255)
+        colors.append((r, g, b))
+    return colors
+
+
+def draw_preds(img, input_size, boxes, confs, labels, num_class):
+    img_size = img.shape[:2]
+    x_scale = img_size[1] / input_size[1]
+    y_scale = img_size[0] / input_size[0]
+    colors = gen_random_colors(num_class)
+    font_face = cv.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.5
+    font_thickness = 1
+
+    for (x1, y1, x2, y2), conf, label in zip(boxes, confs, labels):
+        x1 = int(x1 * x_scale)
+        y1 = int(y1 * y_scale)
+        x2 = int(x2 * x_scale)
+        y2 = int(y2 * y_scale)
+        class_id = int(label)
+
+        print(f"box: [{x1},{y1},{x2},{y2}] | conf: {conf} | label: {label}")
+
+        text = f"{int(label)} {conf * 100 :3.1f}%"
+        color = colors[class_id]
+        (text_width, text_height), _ = cv.getTextSize(
+            text, font_face, font_scale, font_thickness
+        )
+        cv.rectangle(img, (x1, y1), (x2, y2), color, 1)
+        cv.rectangle(img, (x1, y1 - text_height), (x1 + text_width, y1), color, -1)
+        cv.putText(
+            img,
+            text,
+            (x1, y1),
+            font_face,
+            font_scale,
+            (255, 255, 255),
+            font_thickness,
+            cv.LINE_AA,
+        )
+    return img
+
+
+def run_infer(onnx_model, input_size, num_class, in_path, out_path):
     img = cv.imread(in_path)
     if img is None:
         raise ValueError("Invalid image")
@@ -135,18 +183,9 @@ def run_infer(onnx_model, input_size, n_classes, in_path, out_path):
 
     session = ort.InferenceSession(onnx_model)
     outputs = session.run(None, {"data": img_input})
-    boxes, confs, labels = post_process(outputs[0], input_size, n_classes)
+    boxes, confs, labels = post_process(outputs[0], input_size, num_class)
 
-    x_scale = img_size[1] / input_size[1]
-    y_scale = img_size[0] / input_size[0]
-
-    for (x1, y1, x2, y2), conf, label in zip(boxes, confs, labels):
-        x1 = int(x1 * x_scale)
-        y1 = int(y1 * y_scale)
-        x2 = int(x2 * x_scale)
-        y2 = int(y2 * y_scale)
-        print(f"box: [{x1},{y1},{x2},{y2}] | conf: {conf} | label: {label}")
-        cv.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    img = draw_preds(img, input_size, boxes, confs, labels, num_class)
     cv.imwrite(out_path, img)
 
 
@@ -156,7 +195,7 @@ def parse_args():
     parser.add_argument(
         "-s", "--input_size", type=str, help="h,w - input size to the model"
     )
-    parser.add_argument("-n", "--n_classes", type=int, help="number of classes")
+    parser.add_argument("-n", "--num_class", type=int, help="number of classes")
     parser.add_argument("-i", "--input", type=str, help="path to input image")
     parser.add_argument("-o", "--output", type=str, help="path to write output")
     return parser.parse_args()
@@ -166,7 +205,7 @@ if __name__ == "__main__":
     args = parse_args()
     try:
         run_infer(
-            args.model, eval(args.input_size), args.n_classes, args.input, args.output
+            args.model, eval(args.input_size), args.num_class, args.input, args.output
         )
     except ValueError:
         print("error: invalid image")
