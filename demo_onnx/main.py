@@ -15,39 +15,9 @@ IOU_THRESHOLD = 0.3
 STRIDES = [8, 16, 32, 64]
 
 
-def get_resize_matrix(raw_shape, dst_shape, keep_ratio):
-    r_h, r_w = raw_shape
-    d_h, d_w = dst_shape
-    Rs = np.eye(3)
-    if keep_ratio:
-        C = np.eye(3)
-        C[0, 2] = -r_w / 2
-        C[1, 2] = -r_h / 2
-
-        if r_w / r_h < d_w / d_h:
-            ratio = d_h / r_h
-        else:
-            ratio = d_w / r_w
-        Rs[0, 0] *= ratio
-        Rs[1, 1] *= ratio
-
-        T = np.eye(3)
-        T[0, 2] = 0.5 * d_w
-        T[1, 2] = 0.5 * d_h
-        return T @ Rs @ C
-    else:
-        Rs[0, 0] *= d_w / r_w
-        Rs[1, 1] *= d_h / r_h
-        return Rs
-
-
 def preprocess(img, input_size):
     img_size = img.shape[:2]
-
-    # TODO: Prefer OpenCV resize; warpPerspective is used only to match NanoDet-Plus preprocessing exactly.
-    M = get_resize_matrix(img_size, input_size, False)
-    img = cv.warpPerspective(img, M, dsize=input_size)
-
+    img = cv2.resize(img, input_size)
     img = img.astype(np.float32) / 255.0
     mean = np.array(MEAN, dtype="float32").reshape(1, 1, -1) / 255.0
     std = np.array(STD, dtype="float32").reshape(1, 1, -1) / 255.0
@@ -76,10 +46,10 @@ def softmax(logits):
 
 
 def integrate(reg_preds, reg_max=7):
-    project = np.linspace(0, reg_max, reg_max + 1)
+    d = np.linspace(0, reg_max, reg_max + 1)
     reg_preds = reg_preds.reshape(*reg_preds.shape[:-1], 4, -1)
     probs = softmax(reg_preds)
-    dist = probs @ project.T
+    dist = probs @ d.T
     return dist
 
 
@@ -181,10 +151,7 @@ def run_infer(onnx_model, input_size, n_classes, in_path, out_path):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="ONNX inference demo",
-    )
+    parser = argparse.ArgumentParser(description="ONNX inference demo")
     parser.add_argument("-m", "--model", type=str, help="path to ONNX model")
     parser.add_argument(
         "-s", "--input_size", type=str, help="h,w - input size to the model"
